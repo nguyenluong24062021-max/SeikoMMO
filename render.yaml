@@ -11,24 +11,26 @@ services:
     # Monorepo: build ở root directory
     rootDir: .
     
-    # Build command: install deps → build shared → generate Prisma → build API → migrate DB.
-    # NOTE: binaries are called from root node_modules/.bin directly because npm
-    # does not link workspace bins into per-package node_modules (proven in Docker).
+    # Build command: pnpm (npm không hiểu workspace:* protocol).
+    # pnpm-lock.yaml đã commit nên install deterministic.
     buildCommand: |
-      npm install && \
-      ./node_modules/.bin/tsc -p packages/shared/tsconfig.json && \
-      ./node_modules/.bin/prisma generate --schema=./apps/api/prisma/schema.prisma && \
-      cd apps/api && ../../node_modules/.bin/nest build && cd ../.. && \
-      ./node_modules/.bin/prisma db push --schema=./apps/api/prisma/schema.prisma --accept-data-loss
+      npm install -g pnpm@8.15.0 && \
+      pnpm install && \
+      pnpm --dir packages/shared build && \
+      pnpm --dir apps/api prisma:generate && \
+      pnpm --dir apps/api build && \
+      apps/api/node_modules/.bin/prisma db push --schema=./apps/api/prisma/schema.prisma --accept-data-loss
     
     # Start command: chạy compiled JS từ dist
     startCommand: node apps/api/dist/main.js
     
     # Health check endpoint
     healthCheckPath: /health
-    
-    # Environment variables
+
+    # Ghim Node 20 (code đã verify local, tránh surprise với Node mới nhất)
     envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
       - key: NODE_ENV
         value: production
       
