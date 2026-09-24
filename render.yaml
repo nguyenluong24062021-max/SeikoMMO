@@ -1,0 +1,73 @@
+# Render Blueprint for SeikoMMO API
+# Deploy: Push this file to GitHub repo, then create Blueprint from Render Dashboard
+
+services:
+  - type: web
+    name: seiko-mmo-api
+    runtime: node
+    plan: free
+    region: singapore # Hoặc oregon cho free tier
+    
+    # Monorepo: build ở root directory
+    rootDir: .
+    
+    # Build command: install deps → build shared → generate Prisma → build API → migrate DB.
+    # NOTE: binaries are called from root node_modules/.bin directly because npm
+    # does not link workspace bins into per-package node_modules (proven in Docker).
+    buildCommand: |
+      npm install && \
+      ./node_modules/.bin/tsc -p packages/shared/tsconfig.json && \
+      ./node_modules/.bin/prisma generate --schema=./apps/api/prisma/schema.prisma && \
+      cd apps/api && ../../node_modules/.bin/nest build && cd ../.. && \
+      ./node_modules/.bin/prisma db push --schema=./apps/api/prisma/schema.prisma --accept-data-loss
+    
+    # Start command: chạy compiled JS từ dist
+    startCommand: node apps/api/dist/main.js
+    
+    # Health check endpoint
+    healthCheckPath: /health
+    
+    # Environment variables
+    envVars:
+      - key: NODE_ENV
+        value: production
+      
+      # Database (Neon PostgreSQL) - PHẢI điền manual, không commit vào repo
+      - key: DATABASE_URL
+        sync: false
+      
+      # JWT secrets - PHẢI điền manual (tên phải khớp code: JWT_ACCESS_SECRET / JWT_REFRESH_SECRET)
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      
+      # SePay (VND payment gateway)
+      - key: SEPAY_API_TOKEN
+        sync: false
+      - key: SEPAY_SECRET
+        sync: false
+      - key: SEPAY_ALLOW_UNSIGNED
+        value: false
+      
+      # NOWPayments (Crypto gateway)
+      - key: NOWPAYMENTS_API_KEY
+        sync: false
+      - key: NOWPAYMENTS_IPN_SECRET
+        sync: false
+      - key: NOWPAYMENTS_SANDBOX
+        value: false
+      
+      # Crypto payment provider selection
+      - key: CRYPTO_PAYMENT_PROVIDER
+        value: nowpayments
+      
+      # SMM Provider encryption key - PHẢI điền manual
+      - key: PROVIDER_KEY_SECRET
+        sync: false
+      
+      # Web frontend URL (hỗ trợ nhiều domain, ngăn cách bởi dấu phẩy)
+      # TODO: đổi thành URL Vercel thật sau khi deploy web
+      - key: WEB_URL
+        value: https://seiko-mmo-web.onrender.com
+      # NOTE: KHÔNG set PORT — Render tự cấp qua env, code đã đọc process.env.PORT

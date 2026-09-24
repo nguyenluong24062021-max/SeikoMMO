@@ -1,0 +1,361 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  BUYER
+  SELLER
+  ADMIN
+}
+
+enum ProductType {
+  DIGITAL
+  TOOL
+  SEEDING
+}
+
+enum StockStatus {
+  AVAILABLE
+  SOLD
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PROCESSING
+  DELIVERED
+  COMPLETED
+  PARTIAL
+  CANCELLED
+  DISPUTED
+}
+
+enum VoucherType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum TransactionType {
+  DEPOSIT
+  PAYMENT
+  PAYOUT
+  REFUND
+  COMMISSION
+}
+
+enum PaymentProvider {
+  SEPAY
+  NOWPAYMENTS
+  MANUAL
+}
+
+enum PayoutStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum DisputeStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  REJECTED
+}
+
+model User {
+  id                  String   @id @default(uuid())
+  email               String   @unique
+  password            String
+  name                String
+  role                UserRole @default(BUYER)
+  refreshToken        String?
+  referralCode        String?  @unique // Unique code for this user to share with others
+  referredBy          String?  // Referral code of the user who referred this user
+  hasReceivedReferral Boolean  @default(false) // Track if referrer has received commission
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  shops         Shop[]
+  orders        Order[]
+  wallet        Wallet?
+  reviews       Review[]
+
+  @@map("users")
+}
+
+model Shop {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  ownerId     String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  products    Product[]
+  vouchers    Voucher[]
+
+  @@map("shops")
+}
+
+model Product {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  type        ProductType
+  price       Int         // VND - changed from Float to Int
+  shopId      String
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  shop            Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  stocks          ProductStock[]
+  orderItems      OrderItem[]
+  reviews         Review[]
+  flashSales      FlashSale[]
+  serviceMappings ServiceMapping[]
+
+  @@map("products")
+}
+
+model ProductStock {
+  id         String      @id @default(uuid())
+  productId  String
+  key        String      @unique
+  status     StockStatus @default(AVAILABLE)
+  soldAt     DateTime?   @db.Timestamptz(3)
+  orderId    String?
+  createdAt  DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime    @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order      Order?      @relation(fields: [orderId], references: [id])
+
+  @@map("product_stocks")
+}
+
+model Order {
+  id                String      @id @default(uuid())
+  buyerId           String
+  totalAmount       Int         // VND - changed from Float to Int
+  status            OrderStatus @default(PENDING)
+  commissionRate    Int         @default(10) // % fee for platform
+  sellerAmount      Int?        // Amount seller receives after commission
+  sellerId          String?     // Track seller for commission distribution
+  voucherCode       String?     // Applied voucher code
+  discountAmount    Int         @default(0) // Discount from voucher in VND
+  processingStatus  String?     // For SEEDING orders: progress info
+  processedQuantity Int         @default(0) // For SEEDING orders: how many processed
+  providerOrderId   String?     // External provider order ID for SEEDING orders
+  providerId        String?     // Which SMM provider is handling this order
+  createdAt         DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime    @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  buyer       User           @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  items       OrderItem[]
+  stocks      ProductStock[]
+  transactions Transaction[]
+  disputes    Dispute[]
+  voucher     Voucher?       @relation(fields: [voucherCode], references: [code])
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String   @id @default(uuid())
+  orderId    String
+  productId  String
+  quantity   Int
+  price      Int      // VND - changed from Float to Int
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  // Relations
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("order_items")
+}
+
+model Wallet {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  balance     Int      @default(0) // VND - changed from Float to Int
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  payouts      Payout[]
+
+  @@map("wallets")
+}
+
+model Transaction {
+  id              String          @id @default(uuid())
+  walletId        String
+  userId          String?         // User who initiated the deposit/transaction
+  orderId         String?
+  amount          Int             // VND - changed from Float to Int
+  type            TransactionType // Changed from String to enum
+  status          String          @default("COMPLETED") // PENDING, COMPLETED, FAILED
+  description     String?
+  provider        PaymentProvider @default(SEPAY) // Payment provider: SEPAY, NOWPAYMENTS, MANUAL
+  providerTxId    String?         @unique // Universal provider transaction ID (replaces sePayTransId)
+  sePayTransId    String?         @unique // DEPRECATED: SePay transaction ID (kept for backward compatibility)
+  canWithdrawAt   DateTime?       @db.Timestamptz(3) // Timestamp when funds can be withdrawn (24h hold)
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+
+  // Relations
+  wallet      Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  order       Order?   @relation(fields: [orderId], references: [id])
+
+  @@map("transactions")
+}
+
+model Payout {
+  id          String       @id @default(uuid())
+  walletId    String
+  amount      Int          // VND - changed from Float to Int
+  status      PayoutStatus // Changed from String to enum
+  description String?
+  resolvedBy  String?      // Admin user ID who approved/rejected
+  resolvedAt  DateTime?    @db.Timestamptz(3) // When the payout was approved/rejected
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  wallet      Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@map("payouts")
+}
+
+model Dispute {
+  id            String        @id @default(uuid())
+  orderId       String
+  userId        String        // Who opened the dispute (buyer)
+  reason        String
+  status        DisputeStatus @default(OPEN)
+  resolution    String?
+  refundAmount  Int?          // VND - amount to refund if approved
+  adminNote     String?       // Admin's internal note
+  resolvedBy    String?       // Admin user ID who resolved
+  resolvedAt    DateTime?     @db.Timestamptz(3) // When the dispute was resolved
+  createdAt     DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime      @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  order         Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("disputes")
+}
+
+model Review {
+  id          String   @id @default(uuid())
+  productId   String
+  userId      String
+  rating      Int      // 1-5
+  comment     String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId])
+  @@map("reviews")
+}
+
+model Voucher {
+  id          String      @id @default(uuid())
+  code        String      @unique
+  type        VoucherType
+  value       Int         // Percentage (10 = 10%) or Fixed Amount (VND)
+  maxUses     Int         @default(1) // Maximum number of times this voucher can be used
+  usedCount   Int         @default(0) // How many times it has been used
+  expiresAt   DateTime?   @db.Timestamptz(3) // Optional expiration date
+  shopId      String?     // If null, applies to all shops (platform-wide)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  shop        Shop?       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  orders      Order[]
+
+  @@map("vouchers")
+}
+
+model FlashSale {
+  id           String    @id @default(uuid())
+  productId    String
+  salePrice    Int       // Discounted price in VND
+  stockCap     Int       // Maximum quantity available for flash sale
+  soldCount    Int       @default(0) // How many have been sold
+  startAt      DateTime  @db.Timestamptz(3) // When flash sale starts
+  endAt        DateTime  @db.Timestamptz(3) // When flash sale ends
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("flash_sales")
+}
+
+enum ProviderStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+}
+
+model SmmProvider {
+  id                String         @id @default(uuid())
+  name              String         @unique // Provider name (e.g., "Provider A", "SMM Panel X")
+  apiUrl            String         // Base API URL
+  apiKeyEncrypted   String         // AES-256-GCM encrypted API key
+  balanceEndpoint   String?        // Optional endpoint to check balance
+  status            ProviderStatus @default(ACTIVE)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  serviceMappings   ServiceMapping[]
+
+  @@map("smm_providers")
+}
+
+model ServiceMapping {
+  id              String      @id @default(uuid())
+  productId       String      // Our internal product ID
+  providerId      String      // SMM provider ID
+  providerServiceId String    // Service ID on provider's system
+  ratePerThousand Int         // Cost in VND per 1000 units
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime    @updatedAt @db.Timestamptz(3)
+
+  // Relations
+  product         Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  provider        SmmProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, providerId]) // One mapping per product per provider
+  @@map("service_mappings")
+}

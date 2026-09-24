@@ -1,0 +1,13 @@
+# Never copy host dependencies or build output into Docker images.
+# Host node_modules contains symlinks that break BuildKit snapshotting.
+node_modules
+.next
+dist
+build
+.turbo
+.git
+*.log
+.env
+.env.local
+.env.prod
+coverage
