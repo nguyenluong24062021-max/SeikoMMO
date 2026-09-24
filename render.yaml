@@ -15,7 +15,7 @@ services:
     # pnpm-lock.yaml đã commit nên install deterministic.
     buildCommand: |
       npm install -g pnpm@8.15.0 && \
-      pnpm install && \
+      pnpm install --prod=false && \
       pnpm --dir packages/shared build && \
       pnpm --dir apps/api prisma:generate && \
       pnpm --dir apps/api build && \
