@@ -43,6 +43,11 @@ services:
         sync: false
       - key: JWT_REFRESH_SECRET
         sync: false
+      # Hạn token (thiếu 2 biến này là jsonwebtoken throw, register/login 500)
+      - key: JWT_ACCESS_EXPIRATION
+        value: 15m
+      - key: JWT_REFRESH_EXPIRATION
+        value: 7d
       
       # SePay (VND payment gateway)
       - key: SEPAY_API_TOKEN
